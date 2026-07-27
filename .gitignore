@@ -1,0 +1,21 @@
+# Virtual Environments
+venv/
+.venv/
+env/
+
+# Python Cache & Runtime Artifacts
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Execution Sandbox Runtime Outputs
+sandbox_workspace/
+
+# Environment Variables & Sensitive API Keys
+.env
+
+# Model & Data Artifacts
+*.pkl
+*.joblib
+*.csv
+.DS_Store
