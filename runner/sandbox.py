@@ -1,60 +1,50 @@
-import subprocess
 import sys
+import subprocess
 from pathlib import Path
 from typing import Tuple
 
 
+def execute_script(script_path: str, timeout: int = 60) -> Tuple[bool, str, str]:
+    """
+    Executes a Python script in an isolated subprocess with a timeout.
+    
+    Args:
+        script_path (str): Relative or absolute path to the target Python script.
+        timeout (int): Maximum time in seconds before terminating execution.
+
+    Returns:
+        Tuple[bool, str, str]: (success_boolean, stdout_logs, stderr_logs)
+    """
+    resolved_path = Path(script_path).resolve()
+    
+    if not resolved_path.exists():
+        return False, "", f"FileNotFoundError: Script '{resolved_path}' does not exist."
+
+    # Use current active python interpreter
+    python_executable = sys.executable
+
+    try:
+        process = subprocess.run(
+            [python_executable, str(resolved_path)],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+
+        stdout = process.stdout.strip()
+        stderr = process.stderr.strip()
+        success = (process.returncode == 0)
+
+        return success, stdout, stderr
+
+    except subprocess.TimeoutExpired as exc:
+        return False, "", f"ExecutionTimedOut: Script exceeded {timeout} seconds limit."
+    except Exception as exc:
+        return False, "", f"SandboxRunnerError: {str(exc)}"
+
+
 class SandboxRunner:
-    """Handles controlled, isolated execution of dynamically generated Python scripts."""
-
-    def __init__(
-        self,
-        workspace_dir: str = "sandbox_workspace",
-        timeout_seconds: int = 60,
-    ):
-        """
-        Args:
-            workspace_dir (str): Directory where generated scripts execute.
-            timeout_seconds (int): Maximum allowed execution time before process termination.
-        """
-        self.workspace_dir = Path(workspace_dir).resolve()
-        self.workspace_dir.mkdir(parents=True, exist_ok=True)
-        self.timeout_seconds = timeout_seconds
-
-    def execute_script(self, script_path: str) -> Tuple[bool, str, str]:
-        """Executes a Python script in an isolated subprocess.
-
-        Args:
-            script_path (str): File path to the Python script to execute.
-
-        Returns:
-            Tuple[bool, str, str]: (Success status, stdout logs, stderr logs)
-        """
-        # Resolve to absolute path to prevent duplicate directory issues
-        path = Path(script_path).resolve()
-
-        if not path.is_file():
-            return False, "", f"Error: Script file '{script_path}' not found."
-
-        try:
-            # Execute script in isolated subprocess using absolute path
-            result = subprocess.run(
-                [sys.executable, str(path)],
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_seconds,
-                cwd=str(self.workspace_dir),
-            )
-
-            # Exit code 0 indicates success
-            is_success = result.returncode == 0
-            return is_success, result.stdout, result.stderr
-
-        except subprocess.TimeoutExpired:
-            return (
-                False,
-                "",
-                f"ExecutionTimedOut: Script exceeded timeout limit of {self.timeout_seconds} seconds.",
-            )
-        except Exception as e:
-            return False, "", f"ExecutionSystemError: {str(e)}"
+    """Wrapper class for object-oriented interfaces."""
+    @staticmethod
+    def run(script_path: str, timeout: int = 60) -> Tuple[bool, str, str]:
+        return execute_script(script_path, timeout)
