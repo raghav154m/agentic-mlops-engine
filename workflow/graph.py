@@ -1,3 +1,4 @@
+import os
 import shutil
 from langgraph.graph import StateGraph, START, END
 from workflow.state import MLOpsState
@@ -33,6 +34,7 @@ def coder_node(state: MLOpsState) -> dict:
     coder = CodeGeneratorAgent()
     code = coder.generate_code(
         dataset_path=state["dataset_path"],
+        target_column=state["target_column"],
         strategy=state["strategy"]
     )
     script_path = coder.save_script(code)
@@ -69,7 +71,9 @@ def debugger_node(state: MLOpsState) -> dict:
     debugger = DebuggerAgent()
     fixed_code = debugger.fix_code(
         broken_code=state["generated_code"],
-        error_logs=state["error_logs"]
+        error_logs=state["error_logs"],
+        dataset_path=state["dataset_path"],
+        target_column=state["target_column"]
     )
     script_path = debugger.save_script(fixed_code)
     
@@ -82,6 +86,7 @@ def debugger_node(state: MLOpsState) -> dict:
 
 def exporter_node(state: MLOpsState) -> dict:
     print("\n📦 [Node 6: Exporter] Exporting pipeline code and PDF report...")
+    os.makedirs("artifacts", exist_ok=True)
     
     # 1. Export Clean Pipeline Script
     shutil.copy("sandbox_workspace/generated_pipeline.py", "artifacts/pipeline.py")
@@ -120,7 +125,6 @@ def route_after_sandbox(state: MLOpsState) -> str:
 def build_mlops_graph():
     builder = StateGraph(MLOpsState)
 
-    # Register Nodes
     builder.add_node("profiler_node", profiler_node)
     builder.add_node("strategy_node", strategy_node)
     builder.add_node("coder_node", coder_node)
@@ -128,13 +132,11 @@ def build_mlops_graph():
     builder.add_node("debugger_node", debugger_node)
     builder.add_node("exporter_node", exporter_node)
 
-    # Base Flow
     builder.add_edge(START, "profiler_node")
     builder.add_edge("profiler_node", "strategy_node")
     builder.add_edge("strategy_node", "coder_node")
     builder.add_edge("coder_node", "sandbox_node")
 
-    # Routing
     builder.add_conditional_edges(
         "sandbox_node",
         route_after_sandbox,
@@ -152,18 +154,14 @@ def build_mlops_graph():
 
 if __name__ == "__main__":
     app = build_mlops_graph()
-
     initial_input = {
         "dataset_path": "data/sample_dataset.csv",
         "target_column": "churn",
         "retry_count": 0
     }
-
     print("🚀 Starting Complete Agentic MLOps StateGraph Workflow...")
     final_output = app.invoke(initial_input)
-
     print("\n" + "=" * 45)
     print("🏁 LangGraph Workflow Execution Summary")
     print("=" * 45)
     print(f"Final Status: {'SUCCESS ✅' if final_output.get('execution_status') else 'FAILED ❌'}")
-    print(f"Artifacts: artifacts/pipeline.py, artifacts/summary_report.pdf")

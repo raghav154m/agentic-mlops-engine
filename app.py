@@ -17,12 +17,11 @@ st.markdown(
 
 st.divider()
 
-# Left Sidebar: Inputs & Configuration
+# Sidebar: Inputs & Configuration
 st.sidebar.header("📁 Dataset Configuration")
 uploaded_file = st.sidebar.file_uploader("Upload CSV Dataset", type=["csv"])
 
 if uploaded_file is not None:
-    # Save uploaded file temporarily
     os.makedirs("data", exist_ok=True)
     temp_path = os.path.join("data", uploaded_file.name)
     with open(temp_path, "wb") as f:
@@ -34,17 +33,17 @@ if uploaded_file is not None:
     target_column = st.sidebar.selectbox("Select Target Column", options=list(df.columns))
 
     st.subheader("📊 Dataset Preview")
-    st.dataframe(df.head(10), use_container_width=True)
+    st.dataframe(df.head(10), width='stretch')
 
     col1, col2 = st.columns([1, 4])
     with col1:
-        run_btn = st.button("🚀 Run Autonomous Pipeline", type="primary", use_container_width=True)
+        run_btn = st.button("🚀 Run Autonomous Pipeline", type="primary", width='stretch')
 
     if run_btn:
         st.divider()
         st.subheader("⚙️ Autonomous State Machine Execution")
         
-        status_container = st.status("Initializing workflow graph...", expanded=True)
+        status_container = st.status("Running agentic workflow...", expanded=True)
         
         with status_container:
             st.write("🔍 **Node 1: Profiler** — Extracting dataset statistics and missingness ratios...")
@@ -69,10 +68,24 @@ if uploaded_file is not None:
             tab1, tab2, tab3 = st.tabs(["📄 Generated Pipeline Script", "📈 Execution Output", "📦 Download Deliverables"])
             
             with tab1:
-                st.code(final_output.get("generated_code", ""), language="python")
+                code_content = ""
+                if os.path.exists("artifacts/pipeline.py"):
+                    with open("artifacts/pipeline.py", "r", encoding="utf-8") as f:
+                        code_content = f.read()
+                elif os.path.exists("sandbox_workspace/generated_pipeline.py"):
+                    with open("sandbox_workspace/generated_pipeline.py", "r", encoding="utf-8") as f:
+                        code_content = f.read()
+                else:
+                    code_content = final_output.get("generated_code", "# No script found.")
+                
+                st.code(code_content, language="python")
                 
             with tab2:
-                st.text(final_output.get("stdout", "No output recorded."))
+                stdout_text = final_output.get("stdout", "")
+                if stdout_text and stdout_text.strip():
+                    st.text(stdout_text)
+                else:
+                    st.info("Pipeline executed with zero console warnings.")
                 
             with tab3:
                 c1, c2 = st.columns(2)
@@ -83,7 +96,7 @@ if uploaded_file is not None:
                             data=f,
                             file_name="pipeline.py",
                             mime="text/x-python",
-                            use_container_width=True
+                            width='stretch'
                         )
                 if os.path.exists("artifacts/summary_report.pdf"):
                     with open("artifacts/summary_report.pdf", "rb") as f:
@@ -92,7 +105,7 @@ if uploaded_file is not None:
                             data=f,
                             file_name="summary_report.pdf",
                             mime="application/pdf",
-                            use_container_width=True
+                            width='stretch'
                         )
         else:
             st.error("❌ Pipeline failed after maximum retry attempts.")

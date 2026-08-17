@@ -1,5 +1,4 @@
 import os
-import re
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
@@ -9,14 +8,9 @@ load_dotenv()
 
 
 def clean_extracted_code(raw_text: str) -> str:
-    """Strips think tags, markdown code blocks, and stray commentary lines."""
     text = str(raw_text)
-    
-    # 1. Remove reasoning / think blocks
     if "</think>" in text:
         text = text.split("</think>")[-1].strip()
-    
-    # 2. Extract content inside ```python ... ```
     if "```python" in text:
         text = text.split("```python")[1].split("```")[0]
     elif "```" in text:
@@ -24,14 +18,11 @@ def clean_extracted_code(raw_text: str) -> str:
 
     lines = text.strip().split("\n")
     cleaned_lines = []
-    
-    # 3. Filter out accidental markdown lines
     for line in lines:
         stripped = line.strip()
         if stripped.startswith(("* ", "- ", "### ", "## ", "**Note:", "Note:")):
             continue
         cleaned_lines.append(line)
-        
     return "\n".join(cleaned_lines).strip()
 
 
@@ -44,6 +35,7 @@ class DebuggerAgent:
         self.llm = ChatGroq(
             model=model_name,
             temperature=0.0,
+            max_tokens=4096,
             api_key=api_key
         )
 
@@ -51,34 +43,41 @@ class DebuggerAgent:
             ("system", """You are an expert Python Debugger and ML Engineer.
 Fix broken Python ML code based on the runtime error trace.
 
-CRITICAL CODE RULES:
-1. Return ONLY pure executable Python code inside a ```python ... ``` block.
-2. Remove any conversational prose, markdown bullets (* or -), or commentary lines that caused syntax errors.
-3. Fix all indentation, unclosed literals, syntax, and KeyError bugs directly.
-4. Ensure all necessary library imports (pandas, numpy, sklearn, joblib) are present at the top.
-5. Standard 4-space indentation throughout."""),
-            ("user", """--- BROKEN CODE ---
+CRITICAL DEBUGGING RULES:
+1. PRESERVE CORE CONTEXT:
+   - Data loading path: `df = pd.read_csv(r"{dataset_path}")`
+   - Target column: `target_col = '{target_column}'`
+2. FIX SYNTAX & UNCLOSED BRACKETS:
+   - Ensure all dictionaries, lists, and function calls are properly closed.
+   - Keep any string mapping dictionaries concise (do NOT write massive multi-line dictionaries).
+3. MANDATORY METRIC PRINTS:
+   - Print evaluation metrics (Accuracy/F1 or RMSE/MAE) to stdout.
+4. NO PLACEHOLDERS: Output the FULL runnable script without '...' or truncation.
+5. Return ONLY executable Python code inside ```python ... ```."""),
+            ("user", """Dataset Path: {dataset_path}
+Target Column: {target_column}
+
+--- BROKEN CODE ---
 {broken_code}
 
 --- ERROR / STACK TRACE ---
 {error_logs}
 
-Provide the complete, corrected, and runnable Python script.""")
+Provide the complete, corrected, fully written Python script.""")
         ])
 
         self.chain = self.prompt_template | self.llm | StrOutputParser()
 
-    def fix_code(self, broken_code: str, error_logs: str) -> str:
-        """Invokes LLM to repair code based on error trace."""
+    def fix_code(self, broken_code: str, error_logs: str, dataset_path: str, target_column: str) -> str:
         raw_response = self.chain.invoke({
             "broken_code": broken_code,
-            "error_logs": error_logs
+            "error_logs": error_logs,
+            "dataset_path": dataset_path,
+            "target_column": target_column
         })
-
         return clean_extracted_code(raw_response)
 
     def save_script(self, code: str, output_path: str = "sandbox_workspace/generated_pipeline.py") -> str:
-        """Saves corrected code back into the workspace."""
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(code)

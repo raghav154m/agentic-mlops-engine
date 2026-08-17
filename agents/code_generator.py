@@ -1,5 +1,4 @@
 import os
-import re
 import json
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -10,14 +9,9 @@ load_dotenv()
 
 
 def clean_extracted_code(raw_text: str) -> str:
-    """Strips think tags, markdown code blocks, and stray commentary lines."""
     text = str(raw_text)
-    
-    # 1. Remove reasoning / think blocks
     if "</think>" in text:
         text = text.split("</think>")[-1].strip()
-    
-    # 2. Extract content inside ```python ... ```
     if "```python" in text:
         text = text.split("```python")[1].split("```")[0]
     elif "```" in text:
@@ -25,14 +19,11 @@ def clean_extracted_code(raw_text: str) -> str:
 
     lines = text.strip().split("\n")
     cleaned_lines = []
-    
-    # 3. Filter out accidental markdown lines that leak into python files
     for line in lines:
         stripped = line.strip()
         if stripped.startswith(("* ", "- ", "### ", "## ", "**Note:", "Note:")):
             continue
         cleaned_lines.append(line)
-        
     return "\n".join(cleaned_lines).strip()
 
 
@@ -45,39 +36,50 @@ class CodeGeneratorAgent:
         self.llm = ChatGroq(
             model=model_name,
             temperature=0.0,
+            max_tokens=4096,
             api_key=api_key
         )
 
         self.prompt_template = ChatPromptTemplate.from_messages([
             ("system", """You are an expert Production ML Engineer.
-Convert the provided JSON Data Strategy Plan into standard, modular, top-to-bottom executable Python code.
+Write clean, concise, top-to-bottom executable Python code that builds a leakage-free Scikit-Learn pipeline.
 
-RULES:
-1. Output ONLY executable Python code inside a ```python ... ``` code block.
-2. Absolutely NO conversational text, NO bullet points (* or -), and NO markdown explanations inside or outside the code block.
-3. Load the dataset from: {dataset_path}
-4. Perform preprocessing, model training, evaluation, and save the model to 'artifacts/model.joblib' using joblib.
-5. Keep all code strictly formatted with 4 spaces of indentation."""),
+MANDATORY RULES:
+1. DATASET & TARGET:
+   - Ingest: `df = pd.read_csv(r"{dataset_path}")`
+   - Target: `target_col = '{target_column}'`
+   - Split: `X = df.drop(columns=[target_col])` and `y = df[target_col]`
+2. CLEANING:
+   - Drop ID/Name/Email columns from X if present: `drop_cols = [c for c in ['Student_ID', 'id', 'Name', 'Email', 'Date'] if c in X.columns]; X = X.drop(columns=drop_cols, errors='ignore')`
+   - For string/numeric cleanup, use simple vectorized operations. Example:
+     `word_map = {{'ninety': '90', 'eighty': '80', 'seventy': '70'}}`
+     Use `pd.to_numeric(series.astype(str).str.strip().str.replace('%','').replace(word_map), errors='coerce')`. Keep dictionaries short.
+3. ZERO DATA LEAKAGE:
+   - Encapsulate all imputation (SimpleImputer), scaling (StandardScaler), and encoding (OneHotEncoder) inside `Pipeline` and `ColumnTransformer`.
+4. EVALUATION & METRICS:
+   - For classification: Use StratifiedKFold, compute cross_val_predict, and print accuracy/classification_report.
+   - For regression: Use KFold / cross_val_predict, and print RMSE and MAE.
+5. SERIALIZATION: Save final fitted model using `joblib.dump(model_pipeline, 'artifacts/model.joblib')`.
+6. Output ONLY pure, complete executable Python code inside ```python ... ``` without ellipses or markdown notes."""),
             ("user", """Dataset Path: {dataset_path}
-Data Strategy Plan:
+Target Column: {target_column}
+Strategy Plan:
 {strategy_json}
 
-Write the complete Python script based on the strategy above.""")
+Write the COMPLETE runnable Python script.""")
         ])
 
         self.chain = self.prompt_template | self.llm | StrOutputParser()
 
-    def generate_code(self, dataset_path: str, strategy: dict) -> str:
-        """Generates raw Python code from the strategy JSON."""
+    def generate_code(self, dataset_path: str, target_column: str, strategy: dict) -> str:
         raw_response = self.chain.invoke({
             "dataset_path": dataset_path,
+            "target_column": target_column,
             "strategy_json": json.dumps(strategy, indent=2)
         })
-
         return clean_extracted_code(raw_response)
 
     def save_script(self, code: str, output_path: str = "sandbox_workspace/generated_pipeline.py") -> str:
-        """Saves generated code into workspace."""
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(code)
