@@ -1,12 +1,8 @@
 import os
 import json
-from dotenv import load_dotenv
-from langchain_groq import ChatGroq
+from agents.llm import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-
-load_dotenv()
-
 
 def clean_extracted_code(raw_text: str) -> str:
     text = str(raw_text)
@@ -21,49 +17,44 @@ def clean_extracted_code(raw_text: str) -> str:
     cleaned_lines = []
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith(("* ", "- ", "### ", "## ", "**Note:", "Note:")):
+        if stripped in ("...", "…") or stripped.startswith(("* ", "- ", "### ", "## ", "**Note:", "Note:")):
             continue
         cleaned_lines.append(line)
     return "\n".join(cleaned_lines).strip()
 
-
 class CodeGeneratorAgent:
-    def __init__(self, model_name: str = "qwen/qwen3.6-27b"):
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise ValueError("GROQ_API_KEY not found in environment variables.")
-
-        self.llm = ChatGroq(
-            model=model_name,
-            temperature=0.0,
-            max_tokens=4096,
-            api_key=api_key
-        )
+    def __init__(self):
+        # Using our centralized LLM manager!
+        self.llm = get_llm(temperature=0.0, max_tokens=4096)
 
         self.prompt_template = ChatPromptTemplate.from_messages([
             ("system", """You are an expert Production ML Engineer.
-Write clean, concise, top-to-bottom executable Python code that builds a leakage-free Scikit-Learn pipeline.
+Write clean, concise, 100% complete Scikit-Learn pipeline code.
 
-MANDATORY RULES:
-1. DATASET & TARGET:
-   - Ingest: `df = pd.read_csv(r"{dataset_path}")`
-   - Target: `target_col = '{target_column}'`
-   - Split: `X = df.drop(columns=[target_col])` and `y = df[target_col]`
-2. CLEANING:
-   - Drop ID/Name/Email columns from X if present: `drop_cols = [c for c in ['Student_ID', 'id', 'Name', 'Email', 'Date'] if c in X.columns]; X = X.drop(columns=drop_cols, errors='ignore')`
-   - For string/numeric cleanup, use simple vectorized operations. Example:
-     `word_map = {{'ninety': '90', 'eighty': '80', 'seventy': '70'}}`
-     Use `pd.to_numeric(series.astype(str).str.strip().str.replace('%','').replace(word_map), errors='coerce')`. Keep dictionaries short.
-3. ZERO DATA LEAKAGE:
-   - Encapsulate all imputation (SimpleImputer), scaling (StandardScaler), and encoding (OneHotEncoder) inside `Pipeline` and `ColumnTransformer`.
-4. EVALUATION & METRICS:
-   - For classification: Use StratifiedKFold, compute cross_val_predict, and print accuracy/classification_report.
-   - For regression: Use KFold / cross_val_predict, and print RMSE and MAE.
-5. SERIALIZATION: Save final fitted model using `joblib.dump(model_pipeline, 'artifacts/model.joblib')`.
-6. Output ONLY pure, complete executable Python code inside ```python ... ``` without ellipses or markdown notes."""),
+ABSOLUTE MANDATORY RULES:
+1. NEVER USE '...' OR PLACEHOLDERS. Write every single line of code in full.
+2. INGESTION & TARGET:
+   df = pd.read_csv(r"{dataset_path}")
+   target_col = '{target_column}'
+   X = df.drop(columns=[target_col])
+   y = df[target_col]
+3. DROP IDENTIFIERS:
+   drop_cols = [c for c in ['id', 'user_id', 'Student_ID', 'Name', 'Email', 'Date'] if c in X.columns]
+   X = X.drop(columns=drop_cols, errors='ignore')
+4. DATA PREPROCESSING (ZERO LEAKAGE):
+   - Clean string numbers: handle '%' and convert with pd.to_numeric(errors='coerce').
+   - Wrap numeric features in Pipeline(SimpleImputer(strategy='median'), StandardScaler()).
+   - Wrap categorical features in Pipeline(SimpleImputer(strategy='most_frequent'), OneHotEncoder(handle_unknown='ignore', drop='first')).
+   - Combine with ColumnTransformer.
+5. MODEL & EVALUATION:
+   - For classification: Use StratifiedKFold, cross_val_predict, and print accuracy and classification_report.
+   - For regression: Use KFold, cross_val_predict, and print RMSE and R2 score.
+6. SERIALIZATION:
+   joblib.dump(model_pipeline, 'artifacts/model.joblib')
+7. Output ONLY executable Python code inside a single ```python ... ``` block."""),
             ("user", """Dataset Path: {dataset_path}
 Target Column: {target_column}
-Strategy Plan:
+Strategy JSON:
 {strategy_json}
 
 Write the COMPLETE runnable Python script.""")

@@ -1,50 +1,41 @@
+import os
 import sys
 import subprocess
-from pathlib import Path
 from typing import Tuple
 
 
-def execute_script(script_path: str, timeout: int = 60) -> Tuple[bool, str, str]:
+def execute_script(script_path: str, timeout: int = 45) -> Tuple[bool, str, str]:
     """
-    Executes a Python script in an isolated subprocess with a timeout.
-    
-    Args:
-        script_path (str): Relative or absolute path to the target Python script.
-        timeout (int): Maximum time in seconds before terminating execution.
-
-    Returns:
-        Tuple[bool, str, str]: (success_boolean, stdout_logs, stderr_logs)
+    Executes a generated Python script in an isolated subprocess sandbox.
+    Includes guardrails against placeholders like '...' or empty scripts.
     """
-    resolved_path = Path(script_path).resolve()
-    
-    if not resolved_path.exists():
-        return False, "", f"FileNotFoundError: Script '{resolved_path}' does not exist."
+    if not os.path.exists(script_path):
+        return False, "", f"Script not found at path: {script_path}"
 
-    # Use current active python interpreter
+    with open(script_path, "r", encoding="utf-8") as f:
+        code_content = f.read().strip()
+
+    # Guardrail: Catch lazy ellipses or incomplete generation
+    if code_content in ("...", "…") or len(code_content.splitlines()) < 8:
+        return False, "", "ValidationError: Generated code is incomplete or contains only placeholders ('...')."
+
     python_executable = sys.executable
 
     try:
         process = subprocess.run(
-            [python_executable, str(resolved_path)],
+            [python_executable, script_path],
             capture_output=True,
             text=True,
             timeout=timeout
         )
 
-        stdout = process.stdout.strip()
-        stderr = process.stderr.strip()
+        stdout = process.stdout
+        stderr = process.stderr
         success = (process.returncode == 0)
 
         return success, stdout, stderr
 
-    except subprocess.TimeoutExpired as exc:
-        return False, "", f"ExecutionTimedOut: Script exceeded {timeout} seconds limit."
-    except Exception as exc:
-        return False, "", f"SandboxRunnerError: {str(exc)}"
-
-
-class SandboxRunner:
-    """Wrapper class for object-oriented interfaces."""
-    @staticmethod
-    def run(script_path: str, timeout: int = 60) -> Tuple[bool, str, str]:
-        return execute_script(script_path, timeout)
+    except subprocess.TimeoutExpired:
+        return False, "", f"Execution timed out after {timeout} seconds."
+    except Exception as e:
+        return False, "", str(e)
