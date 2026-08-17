@@ -1,3 +1,4 @@
+import shutil
 from langgraph.graph import StateGraph, START, END
 from workflow.state import MLOpsState
 from profiler.dataset_profiler import DatasetProfiler
@@ -5,6 +6,7 @@ from agents.strategy_agent import StrategyAgent
 from agents.code_generator import CodeGeneratorAgent
 from agents.debugger_agent import DebuggerAgent
 from runner.sandbox import execute_script
+from exporter.report_generator import generate_pdf_report
 
 
 # --- Node Definitions ---
@@ -38,14 +40,16 @@ def coder_node(state: MLOpsState) -> dict:
 
 
 def sandbox_node(state: MLOpsState) -> dict:
-    print(f"\n⚙️ [Node 4: Sandbox Runner] Executing script (Attempt {state.get('retry_count', 0) + 1})...")
+    attempt = state.get("retry_count", 0) + 1
+    print(f"\n⚙️ [Node 4: Sandbox Runner] Executing script (Attempt {attempt})...")
     script_path = state.get("script_path", "sandbox_workspace/generated_pipeline.py")
     success, stdout, stderr = execute_script(script_path)
 
     if success:
         print("✅ Pipeline executed successfully in sandbox!")
-        print("\n--- Sandbox STDOUT Output ---")
-        print(stdout)
+        if stdout:
+            print("\n--- STDOUT ---")
+            print(stdout)
     else:
         print("❌ Runtime error intercepted by sandbox runner:")
         print(stderr)
@@ -76,17 +80,36 @@ def debugger_node(state: MLOpsState) -> dict:
     }
 
 
+def exporter_node(state: MLOpsState) -> dict:
+    print("\n📦 [Node 6: Exporter] Exporting pipeline code and PDF report...")
+    
+    # 1. Export Clean Pipeline Script
+    shutil.copy("sandbox_workspace/generated_pipeline.py", "artifacts/pipeline.py")
+    
+    # 2. Export PDF Summary
+    pdf_path = generate_pdf_report(
+        output_path="artifacts/summary_report.pdf",
+        dataset_path=state["dataset_path"],
+        target_column=state["target_column"],
+        profile=state.get("profile", {}),
+        strategy=state.get("strategy", {}),
+        execution_status=state.get("execution_status", False),
+        retries_used=state.get("retry_count", 0)
+    )
+    
+    print(f"✅ Exported script: artifacts/pipeline.py")
+    print(f"✅ Exported report: {pdf_path}")
+    return {}
+
+
 # --- Conditional Routing Logic ---
 
 def route_after_sandbox(state: MLOpsState) -> str:
-    """
-    Decides whether to conclude workflow or trigger self-healing loop.
-    """
     if state.get("execution_status"):
-        return END
+        return "exporter_node"
     
     if state.get("retry_count", 0) >= 3:
-        print("\n⚠️ Maximum retry limit (3) reached. Terminating self-healing loop.")
+        print("\n⚠️ Maximum retry limit reached. Skipping exporter.")
         return END
         
     return "debugger_node"
@@ -97,12 +120,13 @@ def route_after_sandbox(state: MLOpsState) -> str:
 def build_mlops_graph():
     builder = StateGraph(MLOpsState)
 
-    # Register All Nodes
+    # Register Nodes
     builder.add_node("profiler_node", profiler_node)
     builder.add_node("strategy_node", strategy_node)
     builder.add_node("coder_node", coder_node)
     builder.add_node("sandbox_node", sandbox_node)
     builder.add_node("debugger_node", debugger_node)
+    builder.add_node("exporter_node", exporter_node)
 
     # Base Flow
     builder.add_edge(START, "profiler_node")
@@ -110,17 +134,18 @@ def build_mlops_graph():
     builder.add_edge("strategy_node", "coder_node")
     builder.add_edge("coder_node", "sandbox_node")
 
-    # Dynamic Self-Healing Loop
+    # Routing
     builder.add_conditional_edges(
         "sandbox_node",
         route_after_sandbox,
         {
             "debugger_node": "debugger_node",
+            "exporter_node": "exporter_node",
             END: END
         }
     )
-    # Loop back to sandbox runner after fixing
     builder.add_edge("debugger_node", "sandbox_node")
+    builder.add_edge("exporter_node", END)
 
     return builder.compile()
 
@@ -134,12 +159,11 @@ if __name__ == "__main__":
         "retry_count": 0
     }
 
-    print("🚀 Starting Self-Healing MLOps StateGraph Workflow...")
+    print("🚀 Starting Complete Agentic MLOps StateGraph Workflow...")
     final_output = app.invoke(initial_input)
 
     print("\n" + "=" * 45)
     print("🏁 LangGraph Workflow Execution Summary")
     print("=" * 45)
     print(f"Final Status: {'SUCCESS ✅' if final_output.get('execution_status') else 'FAILED ❌'}")
-    print(f"Total Retries Used: {final_output.get('retry_count', 0)}")
-    print(f"Script Location: {final_output.get('script_path')}")
+    print(f"Artifacts: artifacts/pipeline.py, artifacts/summary_report.pdf")
