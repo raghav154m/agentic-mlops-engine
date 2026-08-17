@@ -19,3 +19,10 @@ sandbox_workspace/
 *.joblib
 *.csv
 .DS_Store
+.env
+__pycache__/
+*.pyc
+venv/
+sandbox_workspace/
+artifacts/
+.DS_Store
